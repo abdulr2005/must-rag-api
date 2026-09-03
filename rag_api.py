@@ -412,6 +412,26 @@ def is_university_regulation_question(text: str):
     return any(p in text_lower for p in phrases)
 
 
+def detect_graduation_project_intent(text: str):
+    """Return 1 or 2 when a Graduation Project course is requested."""
+
+    text_lower = text.lower()
+
+    if re.search(r'مشروع\s+التخرج\s+(?:الثاني|2)\b', text_lower):
+        return 2
+
+    if re.search(r'مشروع\s+التخرج\s+(?:الأول|الاول|1)\b', text_lower):
+        return 1
+
+    if re.search(r'\bgraduation\s+project\s+(?:ii|2)\b', text_lower):
+        return 2
+
+    if re.search(r'\bgraduation\s+project\s+(?:i|1)\b', text_lower):
+        return 1
+
+    return None
+
+
 # =========================
 # Reranking
 # =========================
@@ -450,6 +470,19 @@ def rerank(
     major = extract_major(
         question
     )
+
+    graduation_project = (
+        detect_graduation_project_intent(
+            question
+        )
+    )
+
+    expected_graduation_code = None
+
+    if graduation_project and major:
+        expected_graduation_code = (
+            f"{major}.{497 + graduation_project}"
+        )
 
     semester_plan_intent = (
         is_semester_plan_question(
@@ -492,11 +525,18 @@ def rerank(
         # 1. Exact Course Code
         # =========================
 
+        metadata_raw = (
+            metadata.get("raw")
+            or {}
+        )
+
+        if not isinstance(metadata_raw, dict):
+            metadata_raw = {}
+
         course_code = str(
-            metadata.get(
-                "course_code",
-                ""
-            )
+            metadata.get("course_code")
+            or metadata_raw.get("course_code")
+            or ""
         ).upper()
 
         course_code_norm = re.sub(r"[.\s,-]", "", course_code)
@@ -513,6 +553,32 @@ def rerank(
             )
         ):
             boost += 0.20
+
+
+        # =========================
+        # 1a. Graduation Project Intent
+        # =========================
+
+        if graduation_project:
+
+            if (
+                expected_graduation_code
+                and course_code
+                == expected_graduation_code
+            ):
+                boost += 0.50
+
+            if (
+                metadata.get("doc_type")
+                == "graduation_project"
+            ):
+                boost += 0.20
+
+            elif (
+                metadata.get("doc_type")
+                == "elective_pool_course"
+            ):
+                boost -= 0.20
 
 
         # =========================
