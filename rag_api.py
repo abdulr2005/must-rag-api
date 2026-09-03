@@ -287,18 +287,24 @@ def extract_major(text: str):
 
     text_lower = text.lower()
 
-    if "ذكاء اصطناعي" in text_lower:
+    if (
+        "الذكاء الاصطناعي" in text_lower
+        or "ذكاء اصطناعي" in text_lower
+    ):
         return "AI"
 
     if (
-        "علوم حاسب" in text_lower
-        or "علوم الحاسب" in text_lower
+        "علوم الحاسب" in text_lower
+        or "علوم الحاسوب" in text_lower
+        or "علوم حاسب" in text_lower
+        or "علم الحاسب" in text_lower
     ):
         return "CS"
 
     if (
-        "نظم معلومات" in text_lower
-        or "نظم المعلومات" in text_lower
+        "نظم المعلومات" in text_lower
+        or "نظام المعلومات" in text_lower
+        or "نظم معلومات" in text_lower
     ):
         return "IS"
 
