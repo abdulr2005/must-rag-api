@@ -23,6 +23,7 @@ Usage:
 
 import argparse
 import json
+import os
 import re
 import sys
 from collections import Counter, defaultdict
@@ -143,7 +144,9 @@ def check_major_field_vocabulary(chunks):
         "AI", "CS", "IS", "AI Major", "CS Major", "IS Major", "General",
         "All Majors (Common)", "CS Major / IS Major (shared)",
         "CS Major / AI Major (shared)", "AI Major / IS Major (shared)",
-        "CS / AI / IS (shared)",
+        "CS / AI / IS (shared)", "AI / CS / IS (Shared)",
+        "AI Major / CS Major (shared)", "AI Major / CS Major / IS Major (shared)",
+        "IS Major / CS Major (shared)",
     }
     seen = Counter(c.get("major") for c in chunks)
     unknown = {m: n for m, n in seen.items() if m is not None and m not in known}
