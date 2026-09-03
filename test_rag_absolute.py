@@ -30,7 +30,7 @@ from collections import Counter, defaultdict
 import requests
 
 BASE_URL = "http://127.0.0.1:8000"
-CHUNKS_PATH = "chunks.json"
+CHUNKS_PATH = "chunks_final.json" if os.path.exists("chunks_final.json") else "chunks.json"
 
 KNOWN_CONFIDENCE = {"verified", "needs_verification"}
 KNOWN_DOC_TYPES = {

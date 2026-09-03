@@ -25,7 +25,8 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 SECONDS_BETWEEN_REQUESTS = 0.7
 MAX_RETRIES_ON_RATE_LIMIT = 3
 
-with open("chunks.json", "r", encoding="utf-8") as f:
+chunks_path = "chunks_final.json" if os.path.exists("chunks_final.json") else "chunks.json"
+with open(chunks_path, "r", encoding="utf-8") as f:
     chunks = [json.loads(line) for line in f if line.strip()]
 
 print(f"Loaded {len(chunks)} chunks")

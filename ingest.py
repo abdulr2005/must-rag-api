@@ -6,7 +6,11 @@ from google import genai
 from google.genai import types
 from supabase import create_client
 
-load_dotenv()
+dotenv_path = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.exists(dotenv_path):
+    load_dotenv(dotenv_path)
+else:
+    load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -22,13 +26,30 @@ if not SUPABASE_KEY:
 gemini = genai.Client(api_key=GEMINI_API_KEY)
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-SECONDS_BETWEEN_REQUESTS = 0.7
-MAX_RETRIES_ON_RATE_LIMIT = 3
+SECONDS_BETWEEN_REQUESTS = 0.5
+MAX_RETRIES_ON_RATE_LIMIT = 5
 
-with open("chunks.json", "r", encoding="utf-8") as f:
+chunks_path = "chunks_final.json" if os.path.exists("chunks_final.json") else "chunks.json"
+print(f"Reading chunks from: {chunks_path}")
+
+with open(chunks_path, "r", encoding="utf-8") as f:
     chunks = [json.loads(line) for line in f if line.strip()]
 
 print(f"Loaded {len(chunks)} chunks")
+
+# Remove obsolete chunks from Supabase if present
+current_chunk_ids = set(c.get("chunk_id") for c in chunks)
+try:
+    res = supabase.table("documents").select("chunk_id").execute()
+    db_ids = set(r["chunk_id"] for r in res.data if "chunk_id" in r)
+    obsolete_ids = list(db_ids - current_chunk_ids)
+    if obsolete_ids:
+        print(f"Removing {len(obsolete_ids)} obsolete chunks from Supabase: {obsolete_ids}")
+        supabase.table("documents").delete().in_("chunk_id", obsolete_ids).execute()
+        print("Obsolete chunks successfully removed.")
+except Exception as e:
+    print(f"Notice during obsolete chunk cleanup: {e}")
+
 
 failed_chunks = []
 
