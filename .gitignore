@@ -4,4 +4,4 @@ __pycache__/
 .venv/
 venv/
 .vscode/
-chunks.json
+.DS_Store

@@ -83,7 +83,7 @@ def extract_course_codes(text: str):
     """
 
     matches = re.findall(
-        r'\b([A-Za-z]{2,4})[.\s-]?(\d{3})\b',
+        r'\b([A-Za-z]{2,5})[.\s,-]?(\d{3})\b',
         text,
         flags=re.IGNORECASE
     )
@@ -277,7 +277,10 @@ def extract_major(text: str):
         return "CS"
 
     if re.search(
-        r'\bIS\b',
+        r'\bIS\.\d{3}\b',   # course code like IS.301
+        text_upper
+    ) or re.search(
+        r'\bIS\s+MAJOR\b',  # explicit "IS Major"
         text_upper
     ):
         return "IS"
@@ -364,6 +367,50 @@ def is_semester_plan_question(text: str):
         for word in plan_words
     )
 
+def is_elective_question(text: str):
+    """
+    Detect questions specifically about elective courses,
+    as distinct from general semester-plan questions.
+    Both can contain "المواد" ("courses"), so this needs to
+    be checked BEFORE the generic semester-plan boost.
+    """
+
+    text_lower = text.lower()
+
+    elective_words = [
+        "اختيارية",
+        "الاختيارية",
+        "اختياري",
+        "elective",
+        "electives",
+        "ec pool",
+        "optional course"
+    ]
+
+    return any(
+        word in text_lower
+        for word in elective_words
+    )
+
+
+def is_university_regulation_question(text: str):
+    """
+    Detect questions specifically about university-level requirements or elective pools
+    (general_regulation_pool), e.g. متطلبات الجامعة, متطلبات جامعة, university elective.
+    """
+    text_lower = text.lower()
+    phrases = [
+        "متطلبات الجامعة",
+        "متطلبات جامعة",
+        "جامعية اختيارية",
+        "جامعة اختيارية",
+        "university elective",
+        "university electives",
+        "متطلب جامعة",
+        "متطلبات عامة"
+    ]
+    return any(p in text_lower for p in phrases)
+
 
 # =========================
 # Reranking
@@ -410,6 +457,18 @@ def rerank(
         )
     )
 
+    elective_intent = (
+        is_elective_question(
+            question
+        )
+    )
+
+    univ_reg_intent = (
+        is_university_regulation_question(
+            question
+        )
+    )
+
     ranked = []
 
     for row in rows:
@@ -440,10 +499,18 @@ def rerank(
             )
         ).upper()
 
+        course_code_norm = re.sub(r"[.\s,-]", "", course_code)
+        question_codes_norm = {
+            re.sub(r"[.\s,-]", "", q)
+            for q in question_codes
+        }
+
         if (
-            course_code
-            and course_code
-            in question_codes
+            course_code_norm
+            and (
+                course_code in question_codes
+                or course_code_norm in question_codes_norm
+            )
         ):
             boost += 0.20
 
@@ -515,10 +582,51 @@ def rerank(
 
 
         # =========================
-        # 5. Semester Plan Intent
+        # 5a. University Regulation Intent
+        #     (checked FIRST so university elective pools take
+        #      precedence over major elective pools)
         # =========================
 
-        if semester_plan_intent:
+        if univ_reg_intent:
+
+            if (
+                metadata.get("doc_type")
+                == "general_regulation_pool"
+            ):
+                boost += 0.40
+
+            elif (
+                metadata.get("doc_type")
+                == "elective_pool_course"
+            ):
+                boost -= 0.15
+
+        # =========================
+        # 5b. Elective Intent (check next - takes priority
+        #     over generic semester-plan since both share
+        #     the word "المواد")
+        # =========================
+
+        elif elective_intent:
+
+            if (
+                metadata.get("doc_type")
+                == "elective_pool_course"
+            ):
+                boost += 0.35
+
+            elif (
+                metadata.get("doc_type")
+                == "semester_plan"
+            ):
+                boost -= 0.05
+
+        # =========================
+        # 5c. Semester Plan Intent
+        #     (only applies when NOT an elective question)
+        # =========================
+
+        elif semester_plan_intent:
 
             if (
                 metadata.get("doc_type")
@@ -688,7 +796,7 @@ def rag_search(
                         query_embedding,
 
                     "match_count":
-                        10,
+                        40,
 
                     "filter":
                         {}
