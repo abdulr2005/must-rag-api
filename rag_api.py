@@ -8,17 +8,12 @@ from google import genai
 from google.genai import types
 from supabase import create_client
 
-import prompts
 
 # =========================
 # Load environment variables
 # =========================
 
-dotenv_path = os.path.join(os.path.dirname(__file__), ".env")
-if os.path.exists(dotenv_path):
-    load_dotenv(dotenv_path)
-else:
-    load_dotenv()
+load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -70,24 +65,6 @@ class SearchRequest(BaseModel):
         default=3,
         ge=1,
         le=10
-    )
-
-
-class ChatRequest(BaseModel):
-    question: str = Field(
-        ...,
-        min_length=2,
-        description="The student's question."
-    )
-    history: list = Field(
-        default_factory=list,
-        description="Prior conversation turns in this session: [{'role': 'user'|'assistant', 'text': '...'}]"
-    )
-    top_k: int = Field(
-        default=5,
-        ge=1,
-        le=10,
-        description="Number of RAG context chunks to retrieve."
     )
 
 
@@ -827,128 +804,160 @@ def health():
 
 
 # =========================
-# Core Retrieval Function
-# =========================
-
-def perform_retrieval(question: str, top_k: int = 5):
-    """
-    Core RAG retrieval: embeds question, performs vector search against
-    Supabase 'match_documents', and applies hybrid reranking.
-    """
-    embedding_result = gemini.models.embed_content(
-        model="gemini-embedding-001",
-        contents=question,
-        config=types.EmbedContentConfig(
-            task_type="RETRIEVAL_QUERY",
-            output_dimensionality=1024
-        )
-    )
-
-    query_embedding = embedding_result.embeddings[0].values
-
-    response = supabase.rpc(
-        "match_documents",
-        {
-            "query_embedding": query_embedding,
-            "match_count": 40,
-            "filter": {}
-        }
-    ).execute()
-
-    rows = response.data or []
-    rows = rerank(question, rows)
-    return rows[:top_k]
-
-
-# =========================
 # RAG Retrieval Endpoint
 # =========================
 
 @app.post("/rag/search")
-def rag_search(request: SearchRequest):
+def rag_search(
+    request: SearchRequest
+):
+
     try:
-        rows = perform_retrieval(request.question, request.top_k)
 
-        results = []
-        for rank, row in enumerate(rows, start=1):
-            results.append({
-                "rank": rank,
-                "text": row["content"],
-                "score": round(row["_final_score"], 4),
-                "vector_score": round(row["_vector_score"], 4),
-                "metadata": row["metadata"]
-            })
+        # =========================
+        # 1. Embed User Question
+        # =========================
 
-        return {
-            "question": request.question,
-            "count": len(results),
-            "results": results
-        }
+        embedding_result = (
+            gemini.models.embed_content(
 
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=str(e)
-        )
+                model=(
+                    "gemini-embedding-001"
+                ),
 
+                contents=(
+                    request.question
+                ),
 
-# =========================
-# End-to-End Chat Endpoint
-# =========================
+                config=(
+                    types.EmbedContentConfig(
 
-@app.post("/chat")
-def chat(request: ChatRequest):
-    """
-    End-to-end Chat endpoint for MUST Academic Advisor.
-    1. Retrieves relevant knowledge base context via hybrid search.
-    2. Builds the turn prompt using prompts.build_turn_prompt().
-    3. Calls Gemini using SYSTEM_PROMPT to generate grounded advising.
-    """
-    try:
-        rows = perform_retrieval(request.question, request.top_k)
+                        task_type=(
+                            "RETRIEVAL_QUERY"
+                        ),
 
-        context_chunks = []
-        for r in rows:
-            meta = r.get("metadata") or {}
-            context_chunks.append({
-                "chunk_id": r.get("chunk_id") or meta.get("chunk_id", ""),
-                "doc_type": meta.get("doc_type", ""),
-                "major": meta.get("major", ""),
-                "semester": meta.get("semester"),
-                "confidence": meta.get("confidence", "verified"),
-                "text": r.get("content", "")
-            })
+                        output_dimensionality=1024
 
-        turn_prompt = prompts.build_turn_prompt(
-            history=request.history,
-            context=context_chunks,
-            question=request.question
-        )
-
-        chat_model = os.getenv("GEMINI_CHAT_MODEL", "gemini-3.5-flash-lite")
-
-        response = gemini.models.generate_content(
-            model=chat_model,
-            contents=turn_prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=prompts.SYSTEM_PROMPT,
-                temperature=0.2,
+                    )
+                )
             )
         )
 
-        answer = response.text.strip()
+        query_embedding = (
+            embedding_result
+            .embeddings[0]
+            .values
+        )
+
+
+        # =========================
+        # 2. Vector Search
+        # =========================
+        #
+        # Retrieve candidate pool
+        # before reranking.
+        #
+
+        response = (
+            supabase.rpc(
+
+                "match_documents",
+
+                {
+                    "query_embedding":
+                        query_embedding,
+
+                    "match_count":
+                        40,
+
+                    "filter":
+                        {}
+                }
+
+            ).execute()
+        )
+
+        rows = (
+            response.data
+            or []
+        )
+
+
+        # =========================
+        # 3. Hybrid Reranking
+        # =========================
+
+        rows = rerank(
+            request.question,
+            rows
+        )
+
+
+        # =========================
+        # 4. Final Top K
+        # =========================
+
+        rows = rows[
+            :request.top_k
+        ]
+
+
+        # =========================
+        # 5. Clean Response
+        # =========================
+
+        results = []
+
+        for rank, row in enumerate(
+            rows,
+            start=1
+        ):
+
+            results.append({
+
+                "rank":
+                    rank,
+
+                "text":
+                    row["content"],
+
+                "score":
+                    round(
+                        row[
+                            "_final_score"
+                        ],
+                        4
+                    ),
+
+                "vector_score":
+                    round(
+                        row[
+                            "_vector_score"
+                        ],
+                        4
+                    ),
+
+                "metadata":
+                    row["metadata"]
+            })
+
 
         return {
-            "question": request.question,
-            "answer": answer,
-            "context": context_chunks,
-            "prompt_version": prompts.SYSTEM_PROMPT_VERSION,
-            "model": chat_model
+
+            "question":
+                request.question,
+
+            "count":
+                len(results),
+
+            "results":
+                results
         }
 
+
     except Exception as e:
+
         raise HTTPException(
             status_code=500,
             detail=str(e)
         )
-
