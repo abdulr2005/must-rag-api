@@ -593,12 +593,28 @@ def rerank(
 
         if gpa is not None:
 
+            chunk_id = str(
+                metadata.get("chunk_id")
+                or ""
+            )
+
+            # Boost the GPA article that matches
+            # the student's GPA range.
             if gpa_rule_matches(
                 metadata,
                 gpa
             ):
                 boost += 0.35
 
+            # Article 1 contains the general
+            # semester registration limits:
+            # 12 minimum, 18 maximum, up to 23
+            # in the allowed exceptional cases.
+            elif chunk_id == "gpa_article_1":
+                boost += 0.30
+
+            # Other non-matching GPA articles
+            # are less relevant.
             elif (
                 metadata.get("doc_type")
                 == "gpa_article"
